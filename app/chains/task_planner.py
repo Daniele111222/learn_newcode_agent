@@ -6,8 +6,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from langchain.prompts import ChatPromptTemplate
 from langchain.chains import LLMChain
 
-from services.bigmodel import get_bigmodel
-from schemas.task import TaskList
+from ..services.bigmodel import get_bigmodel
+from ..schemas.task import TaskList
 
 __all__ = ["task_planning_chain", "parse_tasks"]
 
