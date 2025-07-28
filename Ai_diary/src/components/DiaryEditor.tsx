@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import request from '../utils/request'; // 导入封装好的 request 模块
 
 interface MoodAnalysis {
   sentiment: 'positive' | 'neutral' | 'negative';
@@ -12,29 +13,30 @@ export const DiaryEditor = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [wordCount, setWordCount] = useState(0);
 
+  /**
+   * 当日记内容变化时触发，延时发送请求进行分析
+   */
   useEffect(() => {
     setWordCount(content.length);
-    if (content.trim().length < 10) return;
-    
+    if (content.trim().length < 10) {
+      setAnalysis(null);
+      return;
+    }
+
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
-        // API调用
-        const response = await fetch('/analyze-diary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: content })
-        });
-        
-        const data = await response.json();
-        setAnalysis(data);
+        // request.post<MoodAnalysis> 返回一个 AxiosResponse<MoodAnalysis> 类型的 Promise
+        const response = await request.post<MoodAnalysis>('/analyze-diary', { content });
+        setAnalysis(response.data);
       } catch (error) {
-        console.error('分析失败:', error);
+        console.error('分析请求失败', error);
+        setAnalysis(null);
       } finally {
         setIsLoading(false);
       }
     }, 1500);
-    
+
     return () => clearTimeout(timer);
   }, [content]);
 
@@ -53,7 +55,7 @@ export const DiaryEditor = () => {
                 <span className="ml-4 text-sm font-medium text-gray-600">今日日记</span>
               </div>
               <div className="flex items-center space-x-4">
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-600">
                   {wordCount} 字符
                 </span>
                 {content.length > 0 && (
@@ -120,14 +122,15 @@ export const DiaryEditor = () => {
                     {getSentimentText(analysis.sentiment)}
                   </h3>
                   <p className="text-sm text-white/80">
-                    置信度: {Math.round(analysis.confidence * 100)}%
+                    {/* 确保 confidence 是有效数字再进行计算 */}
+                    置信度: {typeof analysis.confidence === 'number' ? Math.round(analysis.confidence * 100) : 0}%
                   </p>
                 </div>
               </div>
               <div className="text-right">
                 <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
                   <span className="text-2xl font-bold text-white">
-                    {Math.round(analysis.confidence * 100)}
+                    {typeof analysis.confidence === 'number' ? Math.round(analysis.confidence * 100) : 0}
                   </span>
                 </div>
               </div>
