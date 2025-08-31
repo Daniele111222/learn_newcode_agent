@@ -1,5 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import request from '../utils/request'; // 导入封装好的 request 模块
+import MDEditor from '@uiw/react-md-editor';
+import { message, Button, Tooltip, Progress } from 'antd';
+import { PictureOutlined } from '@ant-design/icons';
 
 interface MoodAnalysis {
   sentiment: 'positive' | 'neutral' | 'negative';
@@ -12,9 +15,130 @@ export const DiaryEditor = () => {
   const [analysis, setAnalysis] = useState<MoodAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [wordCount, setWordCount] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
   /**
-   * 当日记内容变化时触发，延时发送请求进行分析
+   * handleAnalyze
+   * 函数用途：当内容变化且达到最小阈值时，请求后端进行情绪分析，并更新分析结果。
+   * @param text 当前编辑器内容
+   */
+  const handleAnalyze = async (text: string) => {
+    setIsLoading(true);
+    try {
+      const response = await request.post<MoodAnalysis>('/analyze-diary', { content: text });
+      setAnalysis(response.data);
+    } catch (error) {
+      console.error('分析请求失败', error);
+      setAnalysis(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * insertAtCursor
+   * 函数用途：在 Markdown 文本中当前光标位置插入指定文本；若无法获取光标，则追加到末尾。
+   * @param insertText 要插入的文本内容
+   */
+  const insertAtCursor = (insertText: string) => {
+    // @uiw/react-md-editor 不直接暴露 selection；此处用退化策略：在文本末尾附加。
+    // 若后续替换占位需要精确位置，可维护占位标记并通过字符串替换实现。
+    setContent((prev) => (prev ? `${prev}\n${insertText}` : insertText));
+  };
+
+  /**
+   * uploadImage
+   * 函数用途：将图片文件上传到后端 /api/v1/upload，返回图片 URL；包含 100MB 体积限制校验与上传进度反馈。
+   * @param file 待上传的文件对象
+   */
+  const uploadImage = async (file: File): Promise<string> => {
+    const MAX_BYTES = 100 * 1024 * 1024; // 100MB
+    if (file.size > MAX_BYTES) {
+      message.error('图片过大，限制 100MB 以内');
+      throw new Error('FILE_TOO_LARGE');
+    }
+
+    const form = new FormData();
+    form.append('file', file);
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const res = await request.post<{ url: string }>(
+        '/api/v1/upload',
+        form,
+        {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (evt) => {
+            if (!evt.total) return;
+            const percent = Math.round((evt.loaded / evt.total) * 100);
+            setUploadProgress(percent);
+          },
+        }
+      );
+      return res.data.url;
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
+  /**
+   * handleFiles
+   * 函数用途：处理拖拽/粘贴/选择的文件集合，逐个上传并插入到 Markdown 中。
+   * @param files FileList 或文件数组
+   */
+  const handleFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    for (const file of list) {
+      try {
+        const url = await uploadImage(file);
+        // 插入标准 Markdown 图片语法
+        insertAtCursor(`![](${url})`);
+        message.success('图片已插入');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
+  /**
+   * handlePaste
+   * 函数用途：监听编辑区域粘贴事件，若存在图片文件则自动上传并插入。
+   * @param e 粘贴事件对象
+   */
+  const handlePaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const item of items) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      await handleFiles(files);
+    }
+  };
+
+  /**
+   * handleDrop
+   * 函数用途：监听拖拽释放事件，读取图片文件并上传插入。
+   * @param e 拖拽释放事件
+   */
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (files && files.length) {
+      await handleFiles(files);
+    }
+  };
+
+  /**
+   * useEffect: 内容变化时计数并触发节流分析
    */
   useEffect(() => {
     setWordCount(content.length);
@@ -22,29 +146,19 @@ export const DiaryEditor = () => {
       setAnalysis(null);
       return;
     }
-
-    const timer = setTimeout(async () => {
-      setIsLoading(true);
-      try {
-        // request.post<MoodAnalysis> 返回一个 AxiosResponse<MoodAnalysis> 类型的 Promise
-        const response = await request.post<MoodAnalysis>('/analyze-diary', { content });
-        setAnalysis(response.data);
-      } catch (error) {
-        console.error('分析请求失败', error);
-        setAnalysis(null);
-      } finally {
-        setIsLoading(false);
-      }
-    }, 1500);
-
+    const timer = setTimeout(() => handleAnalyze(content), 1500);
     return () => clearTimeout(timer);
   }, [content]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-8" data-color-mode="light">
       {/* 编辑器区域 */}
       <div className="relative">
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl">
+        <div
+          className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-2xl"
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+        >
           {/* 编辑器头部 */}
           <div className="bg-gradient-to-r from-indigo-50 to-purple-50 px-6 py-4 border-b border-gray-100">
             <div className="flex items-center justify-between">
@@ -52,7 +166,7 @@ export const DiaryEditor = () => {
                 <div className="w-3 h-3 bg-red-400 rounded-full"></div>
                 <div className="w-3 h-3 bg-yellow-400 rounded-full"></div>
                 <div className="w-3 h-3 bg-green-400 rounded-full"></div>
-                <span className="ml-4 text-sm font-medium text-gray-600">今日日记</span>
+                <span className="ml-4 text-sm font-medium text-gray-600">今日日记（Markdown）</span>
               </div>
               <div className="flex items-center space-x-4">
                 <span className="text-xs text-gray-600">
@@ -64,23 +178,39 @@ export const DiaryEditor = () => {
                     <span className="text-xs text-gray-500">实时分析</span>
                   </div>
                 )}
+                <Tooltip title="插入图片（支持粘贴/拖拽）">
+                  <Button
+                    size="small"
+                    icon={<PictureOutlined />}
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async () => {
+                        const files = input.files;
+                        if (files && files.length) await handleFiles(files);
+                      };
+                      input.click();
+                    }}
+                  >
+                    图片
+                  </Button>
+                </Tooltip>
               </div>
             </div>
           </div>
 
-          {/* 文本编辑区 */}
-          <div className="relative">
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="✨ 在这里记录你的心情故事..."
-              className="w-full h-80 p-6 text-gray-700 placeholder-gray-400 border-none resize-none focus:outline-none focus:ring-0 text-lg leading-relaxed bg-transparent"
-              style={{ fontFamily: '"Noto Sans SC", "PingFang SC", sans-serif' }}
-            />
-            
-            {/* 渐变遮罩效果 */}
-            <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-white to-transparent pointer-events-none"></div>
+          {/* Markdown 编辑器 */}
+          <div className="relative" ref={editorRef} onPaste={handlePaste}>
+            <MDEditor value={content} onChange={(v) => setContent(v || '')} height={320} preview="edit" />
           </div>
+
+          {/* 上传进度 */}
+          {uploading && (
+            <div className="px-6 pb-4">
+              <Progress percent={uploadProgress} size="small" />
+            </div>
+          )}
         </div>
 
         {/* 字数提示 */}
@@ -122,7 +252,6 @@ export const DiaryEditor = () => {
                     {getSentimentText(analysis.sentiment)}
                   </h3>
                   <p className="text-sm text-white/80">
-                    {/* 确保 confidence 是有效数字再进行计算 */}
                     置信度: {typeof analysis.confidence === 'number' ? Math.round(analysis.confidence * 100) : 0}%
                   </p>
                 </div>

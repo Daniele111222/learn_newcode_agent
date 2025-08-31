@@ -13,6 +13,16 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true, // 必须设置为 true，以允许跨域
       },
+      // 新增：代理 /api/v1/upload 到后端用于文件上传
+      '/api/v1/upload': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // 新增：代理 /uploads/* 到后端用于静态资源访问
+      '/uploads': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
     },
   },
   optimizeDeps: {

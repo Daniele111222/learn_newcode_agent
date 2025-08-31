@@ -6,3 +6,4 @@ langchain-community
 pydantic
 langchain-core
 PyJWT
+python-multipart
