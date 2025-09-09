@@ -1,2 +1,2 @@
 # learn_newcode_agent
-一个致力于让新入职的开发实习生以及工作人员快速熟悉代码的agent
+AI日记项目
